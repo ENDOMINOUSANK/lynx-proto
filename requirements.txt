@@ -3,3 +3,4 @@ uvicorn
 requests
 python-multipart
 mistralai
+python-dotenv
