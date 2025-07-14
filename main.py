@@ -36,6 +36,52 @@ def extract_products_from_text(text: str) -> List[str]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines
 
+# @app.post("/extract-shopping-list")
+# async def extract_shopping_list(image: UploadFile = File(...)):
+#     # Read image bytes and encode as base64
+#     image_bytes = await image.read()
+#     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+#     image_data_url = f"data:{image.content_type};base64,{image_base64}"
+
+#     # Prepare messages for Mistral API
+#     messages = [
+#         {
+#             "role": "user",
+#             "content": [
+#                 {
+#                     "type": "text",
+#                     "text": "Extract the shopping list from this image. Only output the list, one item per line. Instructure with quantity and unit if available. Do not include any other text or explanations."
+#                 },
+#                 {
+#                     "type": "image_url",
+#                     "image_url": image_data_url
+#                 }
+#             ]
+#         }
+#     ]
+
+#     # Call Mistral API
+#     try:
+#         client = Mistral(api_key=MISTRAL_API_KEY)
+#         chat_response = client.chat.complete(
+#             model=MISTRAL_MODEL,
+#             messages=messages
+#         )
+#         text = chat_response.choices[0].message.content
+#     except Exception as e:
+#         return {"error": "Failed to process image with Mistral", "details": str(e)}
+
+#     products = extract_products_from_text(text)
+#     if not products:
+#         return {"products": [], "not_available": None}
+
+#     not_available = random.choice(products)
+#     return {
+#         "products": products,
+#         "not_available": not_available
+#     }
+
+
 @app.post("/extract-shopping-list")
 async def extract_shopping_list(image: UploadFile = File(...)):
     # Read image bytes and encode as base64
@@ -50,10 +96,18 @@ async def extract_shopping_list(image: UploadFile = File(...)):
             "content": [
                 {
                     "type": "text",
-                    "text": "Extract the shopping list from this image. Only output the list, one item per line. Instructure with quantity and unit if available. Do not include any other text or explanations."
+                    "text": (
+                        "Extract the shopping list from this image. "
+                        "Only output the list, one item per line. Include quantity and unit if available. "
+                        "Do not include any other text or explanations.\n\n"
+                        "Additionally, categorize each item as 'electronics', 'clothes', or 'groceries'. "
+                        "Return three lists: one for electronics, one for clothes, and one for groceries. "
+                        "Each list should contain the items belonging to that category, one per line. "
+                        "If a category has no items, return an empty list for it."
+                    )
                 },
                 {
-                    "type": "image_url",
+                    "type": "image_url",          
                     "image_url": image_data_url
                 }
             ]
@@ -71,14 +125,46 @@ async def extract_shopping_list(image: UploadFile = File(...)):
     except Exception as e:
         return {"error": "Failed to process image with Mistral", "details": str(e)}
 
-    products = extract_products_from_text(text)
-    if not products:
-        return {"products": [], "not_available": None}
+    # Helper to clean up list items (remove leading dashes, bullets, whitespace)
+    def clean_item(item):
+        return item.lstrip("-•* \t").strip()
 
-    not_available = random.choice(products)
+    # Simple parsing: expects model to return three sections headed by category
+    def parse_categories(text):
+        categories = {"electronics": [], "clothes": [], "groceries": []}
+        current = None
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lower = line.lower()
+            if "electronics" in lower:
+                current = "electronics"
+                continue
+            elif "clothes" in lower:
+                current = "clothes"
+                continue
+            elif "groceries" in lower:
+                current = "groceries"
+                continue
+            if current:
+                categories[current].append(clean_item(line))
+        # Remove empty strings if any
+        for k in categories:
+            categories[k] = [item for item in categories[k] if item]
+        return categories
+
+    categories = parse_categories(text)
+
+    # Pick not_available randomly from all products
+    all_products = categories["electronics"] + categories["clothes"] + categories["groceries"]
+    not_available = random.choice(all_products) if all_products else None
+
     return {
-        "products": products,
-        "not_available": not_available
+        "electronics": categories["electronics"],
+        "clothes": categories["clothes"],
+        "groceries": categories["groceries"],
+        "not_available": clean_item(not_available) if not_available else None
     }
 
 if __name__ == "__main__":
