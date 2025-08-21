@@ -25,9 +25,11 @@ app.add_middleware(
 
 # Global camera state
 cam_on = False
+connected_websockets = set()
 
 @app.post("/extract-main-info")
 async def extract_main_info(image: UploadFile = File(...)):
+    global cam_on
     image_bytes = await image.read()
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
     image_data_url = f"data:{image.content_type};base64,{image_base64}"
@@ -62,11 +64,19 @@ async def extract_main_info(image: UploadFile = File(...)):
     except Exception as e:
         return {"error": "Failed to process image with Mistral", "details": str(e)}
 
-    # Optionally, use regex to extract a value with slashes or a number with units
-    match = re.search(r"\b\d+/\d+\b", text)  # e.g., 123/456
+    match = re.search(r"\b\d+/\d+\b", text)
     if not match:
-        match = re.search(r"\b\d+(\.\d+)?\s*\w+\b", text)  # e.g., 12.5 kg
+        match = re.search(r"\b\d+(\.\d+)?\s*\w+\b", text)
     main_value = match.group(0) if match else text
+
+    # Emit value to all connected websockets
+    for ws in list(connected_websockets):
+        try:
+            await ws.send_json({"main_value": main_value, "success": True})
+        except Exception:
+            connected_websockets.discard(ws)
+
+    cam_on = False  # Turn camera off after emitting
 
     return {"main_value": main_value}
 
@@ -84,12 +94,15 @@ async def set_cam_state(request: Request):
 @app.websocket("/ws/cam-state")
 async def cam_state_ws(websocket: WebSocket):
     await websocket.accept()
+    connected_websockets.add(websocket)
     try:
         while True:
             await websocket.send_json({"cam_on": cam_on})
-            await asyncio.sleep(1)  # Send state every second
+            await asyncio.sleep(1)
     except WebSocketDisconnect:
-        pass
+        connected_websockets.discard(websocket)
+    except Exception:
+        connected_websockets.discard(websocket)
 
 if __name__ == "__main__":
     import uvicorn
