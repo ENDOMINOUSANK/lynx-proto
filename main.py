@@ -70,6 +70,10 @@ async def extract_main_info(image: UploadFile = File(...)):
 
     return {"main_value": main_value}
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the API"}
+
 @app.post("/set-cam-state")
 async def set_cam_state(request: Request):
     global cam_on
